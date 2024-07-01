@@ -468,3 +468,120 @@ inline fun <reified T : Parcelable> Bundle.parcelable(key: String): T? = when {
     SDK_INT >= 33 -> getParcelable(key, T::class.java)
     else -> @Suppress("DEPRECATION") getParcelable(key) as? T
 }
+suspend fun String.saveAudioToGallery(
+    context: Context, mimeType: String = "audio/x-wav", done: (String?) -> Unit, error: () -> Unit
+) = withContext(Dispatchers.IO) {
+    var savedPath: String? = null
+    val contentValues = ContentValues().apply {
+        put(MediaStore.Audio.Media.DISPLAY_NAME, "Vc_${System.currentTimeMillis()}.wav")
+        put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
+        put(MediaStore.Audio.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
+    }
+    val collection: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        contentValues.put(
+            MediaStore.Audio.Media.RELATIVE_PATH,
+            "${Environment.DIRECTORY_MUSIC}"
+        )
+        MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    } else {
+        val directory =
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Vc_${System.currentTimeMillis()}.wav")
+        /*if (!directory.exists()) {
+            directory.mkdirs()
+        }*/
+        contentValues.put(MediaStore.Audio.Media.DATA, directory.absolutePath)
+        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+    }
+
+    val contentResolver = context.contentResolver
+
+    try {
+        // Insert the audio file into the MediaStore and get the URI
+        val audioUri = contentResolver.insert(collection, contentValues)
+        Log.d("inputStram", "saveAudioToGalleryUri:$audioUri ")
+try {
+    audioUri?.let { uri ->
+        // Open an output stream using the ContentResolver
+        contentResolver.openOutputStream(uri)?.use { os ->
+            // Open input stream from the file path
+            val file = File(this@saveAudioToGallery)
+            val inputStream = FileInputStream(file)
+            // Write audio data to the output stream
+            inputStream.copyTo(os)
+            Log.d("inputStram", "saveAudioToGallery:$savedPath ")
+            savedPath = file.absolutePath // Save the file path for later use
+            Log.d("inputStram", "saveAudioToGallery:$savedPath ")
+            os.close()
+            inputStream.close()
+        }
+    }
+}catch(e: FileNotFoundException){
+    Log.d("TAG", "saveAudioToGallery: ")
+}
+
+
+    } catch (e: Exception) {
+        // Handle exceptions
+        Log.e("TAG", "saveAudioToGallery: ${e.message}")
+
+    }
+
+    withContext(Dispatchers.Main) {
+        if (savedPath != null) {
+            Log.d("TAGGing", "saveAudioToGallery:$savedPath ")
+            done.invoke(savedPath)
+        } else {
+            Toast.makeText(context.applicationContext, "Failed to save audio to gallery", Toast.LENGTH_SHORT).show()
+            error.invoke()
+        }
+    }
+}
+
+fun Context.getAudiosFromFolder(folderPath: String): List<AudioDetails> {
+    val audioList = mutableListOf<AudioDetails>()
+    val selection = "${MediaStore.Audio.Media.DATA} like ? AND ${MediaStore.Audio.Media.DISPLAY_NAME} LIKE 'Vc_%'"
+    val selectionArgs = arrayOf("$folderPath%")
+    val projection = arrayOf(
+        MediaStore.Audio.Media.DISPLAY_NAME,
+        MediaStore.Audio.Media._ID,
+        MediaStore.Audio.Media.DURATION, MediaStore.Audio.Media.DATA
+    )
+    val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
+    contentResolver.query(
+        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+        projection,
+        selection,
+        selectionArgs,
+        sortOrder
+    )?.use { cursor ->
+        val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+        val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+        val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+        val pathColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+        while (cursor.moveToNext()) {
+            val name = cursor.getString(nameColumn)
+            val id = cursor.getLong(idColumn)
+            val duration = cursor.getLong(durationColumn)
+            val path = cursor.getString(pathColumn)
+            // Check if the file exists using the file path
+            val file = File(path)
+            if (file.exists()) {
+                val contentUri = ContentUris.withAppendedId(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    id
+                )
+                val audioDetails = AudioDetails(name, contentUri, path)
+                audioList.add(audioDetails)
+            }
+        }
+    }
+    return audioList
+}
+data class AudioDetails(val name: String, val contentUri: Uri, val path: String)
+data class AudioModel(
+    val id: Long,
+    val title: String?,
+    val artist: String?,
+    val data: String?,
+    val uri: Uri
+)
