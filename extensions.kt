@@ -363,3 +363,45 @@ inline fun <reified T : Parcelable> Bundle.parcelable(key: String): T? = when {
     SDK_INT >= 33 -> getParcelable(key, T::class.java)
     else -> @Suppress("DEPRECATION") getParcelable(key) as? T
 }
+
+fun Activity.shareFileWithOtherApps(uri: Uri?,mimeType:String="application/*",shareMessage:String?=null) {
+    try {
+        val intent = Intent(Intent.ACTION_SEND)
+        intent.flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        intent.setDataAndType(uri, mimeType)
+        intent.putExtra(Intent.EXTRA_TEXT, shareMessage)
+        intent.putExtra(Intent.EXTRA_STREAM, uri)
+        startActivity(intent)
+    } catch (_: Exception) {
+    }
+}
+
+fun TextView.makeLinks(vararg links: Pair<String, View.OnClickListener>) {
+    val spannableString = SpannableString(this.text)
+    var startIndexOfLink = -1
+    for (link in links) {
+        val clickableSpan = object : ClickableSpan() {
+            override fun updateDrawState(textPaint: TextPaint) {
+                textPaint.color = textPaint.linkColor
+                textPaint.isUnderlineText=true
+//                textPaint.typeface = Typeface.DEFAULT_BOLD
+                textPaint.color = Color.parseColor("#EE0038")
+            }
+
+            override fun onClick(view: View) {
+                Selection.setSelection((view as TextView).text as Spannable, 0)
+                view.invalidate()
+                link.second.onClick(view)
+            }
+        }
+        startIndexOfLink = this.text.toString().indexOf(link.first, startIndexOfLink + 1)
+        spannableString.setSpan(
+            clickableSpan,
+            startIndexOfLink,
+            startIndexOfLink + link.first.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+    }
+    this.movementMethod = LinkMovementMethod.getInstance()
+    this.setText(spannableString, TextView.BufferType.SPANNABLE)
+}
